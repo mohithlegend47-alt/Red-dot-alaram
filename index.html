@@ -1,0 +1,484 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<style>html{color-scheme:light}body{margin:0}:root{padding:env(safe-area-inset-top,0px) 0 env(safe-area-inset-bottom,0px)}</style>
+<title>Red Dot Alarm</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Familjen+Grotesk:wght@400;500;600&family=Martian+Mono:wght@400;500&display=swap">
+<style>
+  /* Layout: one bedside column. Live clock on top, alarm list, new-alarm form.
+     When an alarm rings, a dark full-screen field hides one small red button among decoy dots. */
+  :root {
+    --bg: #eceff3;
+    --surface: #ffffff;
+    --fg: #12161d;
+    --muted: #5d6675;
+    --line: #d5dae2;
+    --accent: #2457d6;
+    --accent-fg: #ffffff;
+    --danger: #e3202b;
+    --ok: #1f8a4c;
+    --ring-bg: #1a0b10;
+    --ring-fg: #fbeef0;
+    --font-body: 'Familjen Grotesk', system-ui, -apple-system, 'Segoe UI', sans-serif;
+    --font-mono: 'Martian Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0e1218; --surface: #171d26; --fg: #e8ecf2; --muted: #98a2b3; --line: #2a3340;
+      --accent: #7ba0ff; --accent-fg: #0b1020; --ok: #4cc38a;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0e1218; --surface: #171d26; --fg: #e8ecf2; --muted: #98a2b3; --line: #2a3340;
+    --accent: #7ba0ff; --accent-fg: #0b1020; --ok: #4cc38a;
+    color-scheme: dark;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--fg);
+    font-family: var(--font-body);
+    font-size: 16px;
+    line-height: 1.45;
+    padding-block: 24px 40px;
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+  }
+  .app { max-width: 520px; margin: 0 auto; display: flex; flex-direction: column; gap: 24px; }
+  h1, h2, p { margin: 0; }
+  button, input { font: inherit; color: inherit; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  .eyebrow { font-size: 12px; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+  .clock { display: flex; flex-direction: column; gap: 6px; }
+  .now { font-family: var(--font-mono); font-weight: 500; font-size: clamp(40px, 13vw, 68px); line-height: 1.05; letter-spacing: -.03em; font-variant-numeric: tabular-nums; }
+  .now small { font-size: .38em; color: var(--muted); letter-spacing: 0; margin-left: .25em; }
+  .next { color: var(--muted); font-size: 15px; }
+  .next strong { color: var(--fg); font-weight: 600; }
+
+  .arm { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .arm-btn { border: 1.5px solid var(--accent); background: transparent; color: var(--accent); border-radius: 999px; padding: 8px 16px; font-weight: 600; cursor: pointer; }
+  .arm-btn[aria-pressed="true"] { background: var(--ok); border-color: var(--ok); color: #fff; }
+  .arm-note { font-size: 14px; color: var(--muted); min-width: 0; flex: 1 1 180px; }
+
+  h2 { font-size: 13px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); font-weight: 600; margin-bottom: 8px; }
+  .panel { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; }
+
+  .row { display: flex; align-items: center; gap: 14px; padding: 14px 16px; border-top: 1px solid var(--line); }
+  .row:first-child { border-top: 0; }
+  .row.off .t, .row.off .meta { opacity: .5; }
+  .t { font-family: var(--font-mono); font-size: 24px; font-weight: 500; letter-spacing: -.02em; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .t small { font-size: 12px; color: var(--muted); letter-spacing: 0; margin-left: 3px; }
+  .meta { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+  .meta .l { font-weight: 500; overflow-wrap: anywhere; }
+  .meta .d { font-size: 13px; color: var(--muted); }
+  .del { align-self: flex-start; margin-top: 4px; border: 0; background: none; padding: 2px 0; font-size: 13px; color: var(--muted); text-decoration: underline; cursor: pointer; }
+  .empty { padding: 18px 16px; color: var(--muted); }
+
+  .switch { position: relative; width: 48px; height: 28px; flex: none; }
+  .switch input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
+  .switch span { position: absolute; inset: 0; border-radius: 14px; background: var(--line); transition: background .15s; }
+  .switch span::after { content: ""; position: absolute; top: 3px; left: 3px; width: 22px; height: 22px; border-radius: 50%; background: #fff; transition: transform .15s; }
+  .switch input:checked + span { background: var(--accent); }
+  .switch input:checked + span::after { transform: translateX(20px); }
+  .switch input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  form { display: flex; flex-direction: column; gap: 14px; padding: 16px; }
+  .field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+  .field label, .field .lab { font-size: 13px; color: var(--muted); font-weight: 500; }
+  .inputs { display: grid; grid-template-columns: minmax(0, 150px) minmax(0, 1fr); gap: 12px; }
+  input[type="time"], input[type="text"] { width: 100%; min-width: 0; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
+  input[type="time"] { font-family: var(--font-mono); }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip { border: 1px solid var(--line); background: var(--bg); border-radius: 999px; padding: 6px 0; width: 44px; font-size: 13px; font-weight: 500; cursor: pointer; text-align: center; }
+  .chip[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
+  .actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .primary { border: 0; background: var(--accent); color: var(--accent-fg); border-radius: 10px; padding: 11px 20px; font-weight: 600; cursor: pointer; }
+  .ghost { border: 1px solid var(--line); background: transparent; border-radius: 10px; padding: 10px 16px; font-weight: 500; cursor: pointer; }
+  .msg { font-size: 14px; color: var(--muted); }
+  .foot { font-size: 13px; color: var(--muted); display: flex; flex-direction: column; gap: 10px; align-items: flex-start; }
+
+  /* Ringing screen */
+  .ring { position: fixed; inset: 0; z-index: 50; background: var(--ring-bg); color: var(--ring-fg); overflow: hidden; }
+  .ring-head {
+    position: relative; z-index: 2; pointer-events: none; text-align: left;
+    padding-top: calc(env(safe-area-inset-top, 0px) + 20px);
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+  }
+  .ring-time { font-family: var(--font-mono); font-size: 15px; opacity: .75; }
+  .ring-title { font-size: clamp(34px, 11vw, 56px); font-weight: 600; line-height: 1.05; letter-spacing: -.02em; margin-top: 4px; animation: pulse 1s ease-in-out infinite; }
+  .ring-label { margin-top: 4px; opacity: .85; overflow-wrap: anywhere; }
+  .ring-hint { margin-top: 10px; font-size: 14px; opacity: .7; }
+  .field-dots { position: absolute; inset: 0; z-index: 1; pointer-events: none; }
+  .dot { position: absolute; border-radius: 50%; animation: drift var(--dur, 9s) ease-in-out infinite alternate; }
+  .stop {
+    position: absolute; z-index: 3; width: 22px; height: 22px; border-radius: 50%;
+    border: 1px solid #7e2630; background: #c2262f; opacity: .8; cursor: pointer; padding: 0;
+    display: grid; place-items: center;
+  }
+  .stop::after { content: ""; position: absolute; inset: -9px; border-radius: 50%; }
+  .stop i { width: 6px; height: 6px; background: #f0a4a9; opacity: .6; border-radius: 1px; display: block; }
+  .stop:focus-visible { outline: 3px solid #fff; outline-offset: 3px; }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .55; } }
+  @keyframes drift { from { transform: translate(0, 0); } to { transform: translate(var(--dx, 14px), var(--dy, -18px)); } }
+  @media (prefers-reduced-motion: reduce) {
+    .ring-title, .dot { animation: none; }
+    .switch span, .switch span::after { transition: none; }
+  }
+</style>
+
+<main class="app">
+  <header class="clock">
+    <p class="eyebrow">Red Dot Alarm</p>
+    <p class="now" id="now" aria-live="off">--:--:--</p>
+    <p class="next" id="next">No alarm is on.</p>
+    <div class="arm">
+      <button class="arm-btn" id="armBtn" type="button" aria-pressed="false">Arm this page</button>
+      <p class="arm-note" id="armNote">Tap once so the sound can play when the alarm rings.</p>
+    </div>
+  </header>
+
+  <section aria-labelledby="hAlarms">
+    <h2 id="hAlarms">Alarms</h2>
+    <div class="panel" id="list"></div>
+  </section>
+
+  <section aria-labelledby="hNew">
+    <h2 id="hNew">New alarm</h2>
+    <form class="panel" id="form">
+      <div class="inputs">
+        <div class="field">
+          <label for="timeIn">Time</label>
+          <input type="time" id="timeIn" value="07:00" required>
+        </div>
+        <div class="field">
+          <label for="labelIn">Label</label>
+          <input type="text" id="labelIn" maxlength="40" placeholder="Wake up for class" autocomplete="off">
+        </div>
+      </div>
+      <div class="field">
+        <span class="lab" id="repLab">Repeat (leave empty for once)</span>
+        <div class="chips" id="chips" role="group" aria-labelledby="repLab"></div>
+      </div>
+      <div class="actions">
+        <button class="primary" type="submit" id="addBtn">Add alarm</button>
+        <span class="msg" id="formMsg" role="status"></span>
+      </div>
+    </form>
+  </section>
+
+  <div class="foot">
+    <button class="ghost" id="testBtn" type="button">Test the alarm now</button>
+    <p>Keep this page open and in front, with the screen on. Phones pause web pages when the screen locks or the tab closes, and the alarm will not ring then.</p>
+  </div>
+</main>
+
+<div class="ring" id="ring" role="alertdialog" aria-modal="true" aria-labelledby="ringTitle" hidden>
+  <div class="field-dots" id="dots" aria-hidden="true"></div>
+  <div class="ring-head">
+    <p class="ring-time" id="ringTime"></p>
+    <h2 class="ring-title" id="ringTitle" style="color:inherit;letter-spacing:-.02em;text-transform:none;margin-bottom:0;font-size:clamp(34px,11vw,56px)">Wake up</h2>
+    <p class="ring-label" id="ringLabel"></p>
+    <p class="ring-hint">Find the small red button and tap it.</p>
+  </div>
+  <button class="stop" id="stopBtn" type="button" aria-label="Stop alarm"><i></i></button>
+</div>
+
+<script>
+(function () {
+  var KEY = 'red-dot-alarms-v1';
+  var DAYS = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
+  var DAYNAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  var $ = function (id) { return document.getElementById(id); };
+
+  function uid() { return Math.random().toString(36).slice(2, 9); }
+  function pad(n) { return String(n).padStart(2, '0'); }
+  function esc(s) { return String(s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+
+  function load() {
+    try { var s = localStorage.getItem(KEY); if (s) { var v = JSON.parse(s); if (Array.isArray(v)) return v; } } catch (e) {}
+    return [{ id: uid(), time: '06:30', label: 'Example: morning', days: [1, 2, 3, 4, 5], on: false, last: '' }];
+  }
+  var alarms = load();
+  function save() { try { localStorage.setItem(KEY, JSON.stringify(alarms)); } catch (e) {} }
+
+  function fmt12(h, m) { var ap = h >= 12 ? 'PM' : 'AM'; return (h % 12 || 12) + ':' + pad(m) + '<small>' + ap + '</small>'; }
+  function parse(t) { var p = t.split(':'); return [Number(p[0]), Number(p[1])]; }
+  function daysText(d) {
+    if (!d.length) return 'Once';
+    if (d.length === 7) return 'Every day';
+    if (d.join() === '1,2,3,4,5') return 'Weekdays';
+    if (d.join() === '0,6') return 'Weekends';
+    return d.map(function (x) { return DAYNAMES[x]; }).join(', ');
+  }
+
+  /* ---------- list ---------- */
+  function render() {
+    var list = $('list');
+    if (!alarms.length) { list.innerHTML = '<p class="empty">No alarms yet. Add one below.</p>'; updateNext(); return; }
+    list.innerHTML = alarms.map(function (a) {
+      var hm = parse(a.time);
+      return '<div class="row' + (a.on ? '' : ' off') + '">' +
+        '<div class="t">' + fmt12(hm[0], hm[1]) + '</div>' +
+        '<div class="meta"><span class="l">' + esc(a.label || 'Alarm') + '</span><span class="d">' + daysText(a.days) + '</span>' +
+        '<button class="del" type="button" data-act="del" data-id="' + a.id + '">Delete</button></div>' +
+        '<label class="switch"><input type="checkbox" data-act="toggle" data-id="' + a.id + '"' + (a.on ? ' checked' : '') + ' aria-label="Alarm on or off"><span></span></label>' +
+        '</div>';
+    }).join('');
+    updateNext();
+  }
+  $('list').addEventListener('click', function (e) {
+    var b = e.target.closest('[data-act="del"]');
+    if (!b) return;
+    alarms = alarms.filter(function (a) { return a.id !== b.getAttribute('data-id'); });
+    save(); render();
+  });
+  $('list').addEventListener('change', function (e) {
+    var c = e.target.closest('[data-act="toggle"]');
+    if (!c) return;
+    var a = alarms.find(function (x) { return x.id === c.getAttribute('data-id'); });
+    if (a) { a.on = c.checked; a.last = ''; save(); render(); }
+  });
+
+  /* ---------- form ---------- */
+  var selected = new Set();
+  $('chips').innerHTML = DAYS.map(function (d, i) {
+    return '<button type="button" class="chip" aria-pressed="false" data-d="' + i + '" aria-label="' + DAYNAMES[i] + '">' + d + '</button>';
+  }).join('');
+  $('chips').addEventListener('click', function (e) {
+    var b = e.target.closest('.chip'); if (!b) return;
+    var d = Number(b.getAttribute('data-d'));
+    if (selected.has(d)) selected.delete(d); else selected.add(d);
+    b.setAttribute('aria-pressed', selected.has(d) ? 'true' : 'false');
+  });
+  $('form').addEventListener('submit', function (e) {
+    e.preventDefault();
+    var t = $('timeIn').value;
+    if (!t) { $('formMsg').textContent = 'Pick a time first.'; return; }
+    alarms.push({ id: uid(), time: t, label: $('labelIn').value.trim(), days: Array.from(selected).sort(), on: true, last: '' });
+    alarms.sort(function (a, b) { return a.time < b.time ? -1 : a.time > b.time ? 1 : 0; });
+    save(); render();
+    var hm = parse(t);
+    $('formMsg').textContent = 'Alarm set for ' + (hm[0] % 12 || 12) + ':' + pad(hm[1]) + ' ' + (hm[0] >= 12 ? 'PM' : 'AM') + '.';
+    $('labelIn').value = '';
+    if (!armed) arm();
+  });
+
+  /* ---------- clock + next alarm ---------- */
+  function nextOcc(a, now) {
+    var hm = parse(a.time);
+    for (var d = 0; d < 8; d++) {
+      var t = new Date(now); t.setDate(now.getDate() + d); t.setHours(hm[0], hm[1], 0, 0);
+      if (t <= now) continue;
+      if (a.days.length && a.days.indexOf(t.getDay()) < 0) continue;
+      return t;
+    }
+    return null;
+  }
+  function updateNext() {
+    var now = new Date(), best = null;
+    alarms.forEach(function (a) { if (!a.on) return; var t = nextOcc(a, now); if (t && (!best || t < best)) best = t; });
+    var el = $('next');
+    if (!best) { el.textContent = 'No alarm is on.'; return; }
+    var mins = Math.max(1, Math.round((best - now) / 60000)), d = Math.floor(mins / 1440), h = Math.floor((mins % 1440) / 60), m = mins % 60;
+    var txt = d ? d + ' d ' + h + ' h' : h ? h + ' h ' + m + ' min' : m + ' min';
+    el.innerHTML = 'Next alarm in <strong>' + txt + '</strong> · ' + DAYNAMES[best.getDay()] + ' ' + (best.getHours() % 12 || 12) + ':' + pad(best.getMinutes()) + ' ' + (best.getHours() >= 12 ? 'PM' : 'AM');
+  }
+  var lastMin = -1;
+  function tick() {
+    var now = new Date(), h = now.getHours();
+    $('now').innerHTML = (h % 12 || 12) + ':' + pad(now.getMinutes()) + ':' + pad(now.getSeconds()) + '<small>' + (h >= 12 ? 'PM' : 'AM') + '</small>';
+    if (now.getMinutes() !== lastMin) { lastMin = now.getMinutes(); updateNext(); }
+    if (ringing) return;
+    var hhmm = pad(h) + ':' + pad(now.getMinutes()), key = now.toDateString() + ' ' + hhmm;
+    for (var i = 0; i < alarms.length; i++) {
+      var a = alarms[i];
+      if (a.on && a.time === hhmm && a.last !== key && (!a.days.length || a.days.indexOf(now.getDay()) >= 0)) {
+        a.last = key; save(); ring(a); break;
+      }
+    }
+  }
+
+  /* ---------- sound + screen ---------- */
+  var ctx = null, armed = false, wl = null, beepTimer = null;
+  function ensureAudio() {
+    if (!ctx) { var AC = window.AudioContext || window.webkitAudioContext; if (AC) { try { ctx = new AC(); } catch (e) {} } }
+    if (ctx && ctx.state === 'suspended') { try { ctx.resume(); } catch (e) {} }
+    return ctx;
+  }
+  function tone(c, when, freq, dur, vol, type) {
+    var o = c.createOscillator(), g = c.createGain();
+    o.type = type || 'square'; o.frequency.value = freq;
+    g.gain.setValueAtTime(0, when);
+    g.gain.linearRampToValueAtTime(vol, when + 0.01);
+    g.gain.linearRampToValueAtTime(0, when + dur);
+    o.connect(g); g.connect(c.destination);
+    o.start(when); o.stop(when + dur + 0.02);
+  }
+  function startSound() {
+    var c = ensureAudio(); if (!c) return;
+    stopSound();
+    var n = 0;
+    function burst() {
+      var t = c.currentTime + 0.02, vol = Math.min(0.45, 0.12 + n * 0.015);
+      for (var i = 0; i < 3; i++) tone(c, t + i * 0.2, 880, 0.12, vol, 'square');
+      n++;
+    }
+    burst();
+    beepTimer = setInterval(burst, 1000);
+  }
+  function stopSound() { if (beepTimer) { clearInterval(beepTimer); beepTimer = null; } }
+
+  function lockScreen() {
+    try {
+      if ('wakeLock' in navigator) {
+        return navigator.wakeLock.request('screen').then(function (l) {
+          wl = l; l.addEventListener('release', function () { wl = null; updateStatus(); });
+        }).catch(function () {});
+      }
+    } catch (e) {}
+    return Promise.resolve();
+  }
+  function updateStatus() {
+    var snd = ctx && ctx.state === 'running';
+    var b = $('armBtn');
+    b.setAttribute('aria-pressed', armed ? 'true' : 'false');
+    b.textContent = armed ? 'Armed' : 'Arm this page';
+    $('armNote').textContent = armed
+      ? (snd ? 'Sound is on' : 'Sound is blocked. Tap Armed once more.') + (wl ? ' · Screen stays awake' : ' · Screen may sleep, so keep it on')
+      : 'Tap once so the sound can play when the alarm rings.';
+  }
+  function arm() {
+    armed = true;
+    var c = ensureAudio();
+    Promise.resolve(c && c.resume ? c.resume() : null).catch(function () {}).then(function () {
+      if (c && c.state === 'running') tone(c, c.currentTime + 0.02, 660, 0.14, 0.08, 'sine');
+      return askNative().then(lockScreen);
+    }).then(updateStatus);
+    updateStatus();
+  }
+  $('armBtn').addEventListener('click', arm);
+  document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible' && armed) lockScreen().then(updateStatus); });
+
+  /* ---------- ringing ---------- */
+  var ringing = null, moveTimer = null, vibTimer = null;
+  var DECOYS = ['#7a2a35', '#a3463d', '#b8693f', '#5b3a6e', '#3c4a73', '#8a3b52', '#6d5a2e', '#b0242e', '#c0343c', '#a82a36', '#b8303a'];
+  function buildField() {
+    var f = $('dots'), html = '';
+    for (var i = 0; i < 90; i++) {
+      var s = 8 + Math.round(Math.random() * 26);
+      html += '<span class="dot" style="left:' + (Math.random() * 96).toFixed(1) + '%;top:' + (Math.random() * 96).toFixed(1) + '%;width:' + s + 'px;height:' + s + 'px;background:' + DECOYS[i % DECOYS.length] +
+        ';--dx:' + Math.round(Math.random() * 40 - 20) + 'px;--dy:' + Math.round(Math.random() * 40 - 20) + 'px;--dur:' + (6 + Math.random() * 8).toFixed(1) + 's"></span>';
+    }
+    f.innerHTML = html;
+  }
+  function placeStop() {
+    var s = 22, pad2 = 20, W = window.innerWidth, H = window.innerHeight, top0 = Math.min(230, H * 0.36);
+    var x = pad2 + Math.random() * Math.max(1, W - 2 * pad2 - s);
+    var y = top0 + Math.random() * Math.max(1, H - top0 - 56 - s);
+    var b = $('stopBtn'); b.style.left = x + 'px'; b.style.top = y + 'px';
+  }
+  function ring(a) {
+    ringing = a;
+    var now = new Date(), h = now.getHours();
+    $('ringTime').textContent = (h % 12 || 12) + ':' + pad(now.getMinutes()) + ' ' + (h >= 12 ? 'PM' : 'AM');
+    $('ringLabel').textContent = a.label || '';
+    buildField(); placeStop();
+    $('ring').hidden = false;
+    startSound();
+    moveTimer = setInterval(placeStop, 6000);
+    try { if (navigator.vibrate) { navigator.vibrate([400, 200, 400]); vibTimer = setInterval(function () { navigator.vibrate([400, 200, 400]); }, 1500); } } catch (e) {}
+    try { $('stopBtn').focus({ preventScroll: true }); } catch (e) {}
+  }
+  function stopRing() {
+    var a = ringing; ringing = null;
+    stopSound();
+    if (moveTimer) { clearInterval(moveTimer); moveTimer = null; }
+    if (vibTimer) { clearInterval(vibTimer); vibTimer = null; }
+    try { if (navigator.vibrate) navigator.vibrate(0); } catch (e) {}
+    try { if (LN) LN.removeAllDeliveredNotifications(); } catch (e) {}
+    $('ring').hidden = true;
+    if (a && a.id && !a.test && !a.days.length) { a.on = false; save(); render(); }
+  }
+  $('stopBtn').addEventListener('click', stopRing);
+  $('testBtn').addEventListener('click', function () {
+    ensureAudio();
+    ring({ test: true, label: 'Test alarm', days: [] });
+  });
+
+  /* unlock audio on the first tap anywhere */
+  function unlock() { ensureAudio(); document.removeEventListener('click', unlock); document.removeEventListener('touchend', unlock); }
+  document.addEventListener('click', unlock);
+  document.addEventListener('touchend', unlock);
+
+
+  /* ---------- Android app: real phone alerts ---------- */
+  var LN = null;
+  try {
+    if (window.Capacitor && Capacitor.isNativePlatform && Capacitor.isNativePlatform()) {
+      LN = (Capacitor.Plugins && Capacitor.Plugins.LocalNotifications) || null;
+    }
+  } catch (e) {}
+  var syncing = false, syncAgain = false;
+  async function syncNative() {
+    if (!LN) return;
+    if (syncing) { syncAgain = true; return; }
+    syncing = true;
+    try {
+      try { await LN.createChannel({ id: 'alarms', name: 'Alarms', importance: 5, visibility: 1, vibration: true }); } catch (e) {}
+      var pend = await LN.getPending();
+      if (pend && pend.notifications && pend.notifications.length) {
+        await LN.cancel({ notifications: pend.notifications.map(function (n) { return { id: n.id }; }) });
+      }
+      var items = [], now = new Date();
+      alarms.forEach(function (a, i) {
+        if (!a.on) return;
+        var hm = parse(a.time);
+        var base = { title: a.label || 'Alarm', body: 'Tap to open, then find the small red button to stop it.', channelId: 'alarms', extra: { alarmId: a.id } };
+        if (a.days.length) {
+          a.days.forEach(function (d) {
+            items.push(Object.assign({ id: (i + 1) * 10 + d, schedule: { on: { weekday: d + 1, hour: hm[0], minute: hm[1] }, allowWhileIdle: true } }, base));
+          });
+        } else {
+          var t = nextOcc(a, now);
+          if (t) items.push(Object.assign({ id: (i + 1) * 10 + 7, schedule: { at: t, allowWhileIdle: true } }, base));
+        }
+      });
+      if (items.length) await LN.schedule({ notifications: items });
+    } catch (e) {}
+    syncing = false;
+    if (syncAgain) { syncAgain = false; syncNative(); }
+  }
+  async function askNative() {
+    if (!LN) return;
+    try { await LN.requestPermissions(); } catch (e) {}
+    try {
+      var st = await LN.checkExactNotificationSetting();
+      if (st && st.exact_alarm !== 'granted') await LN.changeExactNotificationSetting();
+    } catch (e) {}
+    syncNative();
+  }
+  if (LN) {
+    var _render = render;
+    render = function () { _render(); syncNative(); };
+    try {
+      LN.addListener('localNotificationActionPerformed', function (ev) {
+        var id = ev && ev.notification && ev.notification.extra && ev.notification.extra.alarmId;
+        var a = alarms.find(function (x) { return x.id === id; });
+        if (a && !ringing) {
+          a.last = new Date().toDateString() + ' ' + a.time;
+          save();
+          ring(a);
+        }
+      });
+    } catch (e) {}
+    var note = document.querySelector('.foot p');
+    if (note) note.textContent = 'Alarms are scheduled on your phone, so they alert even when the app is closed. Tap the alert to open the app, then find the small red button.';
+  }
+
+  render(); tick(); setInterval(tick, 1000);
+})();
+</script>
