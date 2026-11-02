@@ -1,0 +1,69 @@
+name: Build APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Create the Android project
+        run: |
+          mkdir -p app/www
+          cp index.html app/www/index.html
+          cd app
+          cat > package.json <<'EOF'
+          {
+            "name": "red-dot-alarm",
+            "version": "1.0.0",
+            "private": true,
+            "dependencies": {
+              "@capacitor/core": "^6.0.0",
+              "@capacitor/android": "^6.0.0",
+              "@capacitor/local-notifications": "^6.0.0"
+            },
+            "devDependencies": {
+              "@capacitor/cli": "^6.0.0"
+            }
+          }
+          EOF
+          cat > capacitor.config.json <<'EOF'
+          {
+            "appId": "com.reddot.alarm",
+            "appName": "Red Dot Alarm",
+            "webDir": "www"
+          }
+          EOF
+          npm install
+          npx cap add android
+          sed -i 's#</manifest>#    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />\n    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />\n    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />\n    <uses-permission android:name="android.permission.VIBRATE" />\n    <uses-permission android:name="android.permission.WAKE_LOCK" />\n</manifest>#' android/app/src/main/AndroidManifest.xml
+          npx cap sync android
+
+      - name: Build the APK
+        working-directory: app/android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug
+
+      - name: Publish the APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp app/android/app/build/outputs/apk/debug/app-debug.apk RedDotAlarm.apk
+          gh release create "v${{ github.run_number }}" RedDotAlarm.apk --repo "${{ github.repository }}" --title "Red Dot Alarm build ${{ github.run_number }}" --notes "Debug APK. Download RedDotAlarm.apk and open it on your phone."
